@@ -156,13 +156,6 @@ public:
         return ep_;
     }
 
-    void reconnect( const ba::ip::udp::endpoint &to )
-    {
-        sock( ).connect( to );
-        std::cout << "re_connect to: " << ep_.address( ).to_string( )
-                  << ":" << ep_.port( ) << std::endl;
-    }
-
     void start( ) override
     {
         ep_.address( ).is_v4( ) ? open_v4( ) : open_v6( );

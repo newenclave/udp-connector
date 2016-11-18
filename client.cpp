@@ -42,7 +42,7 @@ public:
                   << " len "
                   << len << std::endl;
 
-        reconnect( from );
+        sock( ).connect( from );
 
         reader_ = [this](const ba::ip::udp::endpoint &from,
                          std::uint8_t *data, std::size_t len )
@@ -92,9 +92,9 @@ int main( )
 
         udp_connector0 bc( ios, ep );
         bc.start( );
-        bc.sock( ).connect( ep );
+        //bc.sock( ).connect( ep );
         bc.write_to( "hellO!", 6, ep );
-        bc.read( );
+        bc.read_from( ep );
 
         ios.run( );
 
