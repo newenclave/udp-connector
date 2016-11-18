@@ -75,6 +75,8 @@ public:
         if( !err ) {
             reader_( from, data, len );
             read( );
+        } else {
+            std::cout << "Error! " << err.message( ) << "\n";
         }
     }
 };
@@ -90,8 +92,9 @@ int main( )
 
         udp_connector0 bc( ios, ep );
         bc.start( );
+        bc.sock( ).connect( ep );
         bc.write_to( "hellO!", 6, ep );
-        bc.read_from( ep );
+        bc.read( );
 
         ios.run( );
 

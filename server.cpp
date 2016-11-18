@@ -1,6 +1,7 @@
 #include <vector>
 #include <memory>
 #include <iostream>
+#include <set>
 
 #include "boost/asio.hpp"
 
@@ -11,7 +12,7 @@
 namespace ba = boost::asio;
 namespace bs = boost::system;
 
-std::vector<std::shared_ptr<udp_connector> > clients;
+std::set<std::shared_ptr<udp_connector> > clients;
 ba::io_service ios;
 
 void on_accept( const ba::ip::udp::endpoint &from,
@@ -35,7 +36,7 @@ void on_accept( const ba::ip::udp::endpoint &from,
                 client->read( );
             };
 
-    clients.push_back(client);
+    clients.insert(client);
 }
 
 int main( )
