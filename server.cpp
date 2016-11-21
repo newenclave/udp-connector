@@ -61,7 +61,7 @@ struct client_info: public std::enable_shared_from_this<client_info> {
         std::cout << "Start keeper" << std::endl;
         dcall_.call_from_now( [this](const bs::error_code &err) {
             keeper_handler( err );
-        }, delayed_call::seconds( 15 ) );
+        }, delayed_call::seconds( 1 ) );
     }
 
     void on_read( const bs::error_code &err,
@@ -82,7 +82,8 @@ class udp_endpoint_atapter: public udp_endpoint {
     bool         master_;
     client_map   clients_;
 
-protected:
+public:
+
     void add_client( const ba::ip::udp::endpoint &from,
                      client_info::shared_type cl )
     {
@@ -124,6 +125,12 @@ public:
                   << ":" << from.port( )
                   << std::endl;
         clients_.erase( from );
+        on_remove( );
+    }
+
+    virtual void on_remove( )
+    {
+
     }
 
     virtual void call_client( const bs::error_code &err,
@@ -148,10 +155,16 @@ class udp_endpoint_slave: public udp_endpoint_atapter {
 
 public:
 
-    udp_endpoint_slave( ba::io_service &ios, const ba::ip::udp::endpoint ep )
+    udp_endpoint_slave( ba::io_service &ios,
+                        const ba::ip::udp::endpoint &ep,
+                        udp_endpoint_master *master)
         :udp_endpoint_atapter(ios, udp_endpoint_atapter::SLAVE)
         ,ep_(ba::ip::udp::endpoint(ep.address( ), 0))
+        ,parent_master_(master)
     { }
+
+
+    void on_remove( );
 
     void start( )
     {
@@ -179,7 +192,7 @@ class udp_endpoint_master: public udp_endpoint_atapter {
 
     ba::ip::udp::endpoint ep_;
 
-    udp_endpoint_slave slave_;
+    std::vector<udp_endpoint_slave *> slaves_;
 
 public:
 
@@ -188,16 +201,66 @@ public:
                          std::uint16_t port )
         :udp_endpoint_atapter(ios, udp_endpoint_atapter::MASTER)
         ,ep_(ba::ip::address::from_string(addr), port)
-        ,slave_(ios, ep_)
-    { }
+    {
+        slaves_.push_back(new  udp_endpoint_slave( ios, ep_, this ));
+        slaves_.push_back(new  udp_endpoint_slave( ios, ep_, this ));
+        slaves_.push_back(new  udp_endpoint_slave( ios, ep_, this ));
+        slaves_.push_back(new  udp_endpoint_slave( ios, ep_, this ));
+        slaves_.push_back(new  udp_endpoint_slave( ios, ep_, this ));
+    }
 
     void start( )
     {
         ep_.address( ).is_v4( ) ? get_socket( ).open( ba::ip::udp::v4( ) )
                                 : get_socket( ).open( ba::ip::udp::v6( ) );
         get_socket( ).bind( ep_ );
-        slave_.start( );
+        for( auto s: slaves_ ) {
+            s->start( );
+        }
         read_from( get_endpoint( ) );
+    }
+
+    void dec_slave( udp_endpoint_slave *slave )
+    {
+        auto f = std::find( slaves_.begin( ), slaves_.end( ), slave );
+        if( f == slaves_.end( ) ) {
+            std::cout << "Fuuuuck!\n";
+            return;
+        }
+        while( f != slaves_.begin( ) ) {
+            auto prev = f - 1;
+            if( (*prev)->size( ) < (*f)->size( ) ) {
+                std::swap( *f, *prev );
+                f = prev;
+            } else {
+                break;
+            }
+        }
+        for( auto i: slaves_ ) {
+            std::cout << " " << i->size( ) << std::endl;
+        }
+    }
+
+    void inc_slave( )
+    {
+        auto f = slaves_.begin( );
+        while( f != slaves_.end( ) ) {
+            auto next = f + 1;
+            if( next != slaves_.end( ) ) {
+                if( (*next)->size( ) < (*f)->size( ) ) {
+                    std::swap( *f, *next );
+                    f = next;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        for( auto i: slaves_ ) {
+            std::cout << " " << i->size( ) << std::endl;
+        }
     }
 
     void call_client( const bs::error_code &err,
@@ -208,19 +271,25 @@ public:
         if( !cl ) {
             cl = std::make_shared<client_info>( from,
                                               std::ref(get_io_service( )) );
-            cl->parent_ = this;
-            add_client( from, cl );
+            cl->parent_ = (*slaves_.begin( ));
+            cl->parent_->add_client( from, cl );
+            inc_slave( );
         }
         cl->on_read( err, data, len );
     }
 };
+
+void udp_endpoint_slave::on_remove( )
+{
+    parent_master_->dec_slave( this );
+}
 
 void client_info::keeper_handler( const bs::error_code &err )
 {
     std::cout << "Tick! " << err.message( ) << "\n";
     if( !err ) {
         auto now = ticks_now( );
-        if( now - last_ > 30000000 ) {
+        if( now - last_ > 3000000 ) {
             parent_->dispatch( [this]( ) {
                 parent_->remove_client( my_ );
             } );
