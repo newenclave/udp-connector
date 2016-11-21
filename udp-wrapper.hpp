@@ -16,9 +16,11 @@ namespace ph = std::placeholders;
 class udp_endpoint: public std::enable_shared_from_this<udp_endpoint> {
 
     ba::io_service             &ios_;
+    ba::io_service::strand      dispatcher_;
     ba::ip::udp::socket         sock_;
     std::vector<std::uint8_t>   data_;
     ba::ip::udp::endpoint       remote_;
+
 
     typedef std::string message_type;
     typedef std::function <
@@ -64,10 +66,10 @@ public:
 
     udp_endpoint( ba::io_service &ios )
         :ios_(ios)
+        ,dispatcher_(ios_)
         ,sock_(ios_)
         ,data_(4096)
     { }
-
 
     ba::ip::udp::endpoint &get_endpoint( )
     {
@@ -89,7 +91,12 @@ public:
         return ios_;
     }
 
-    ba::ip::udp::socket &sock( )
+    void dispatch( std::function<void ()> call )
+    {
+        dispatcher_.dispatch( std::move(call) );
+    }
+
+    ba::ip::udp::socket &get_socket( )
     {
         return sock_;
     }
@@ -97,21 +104,27 @@ public:
     void write( const char *data, size_t len )
     {
         sock_.async_send( ba::buffer(data, len), 0,
-            std::bind( &udp_endpoint::write_handler, this, ph::_1, ph::_2 ) );
+            dispatcher_.wrap(
+                std::bind( &udp_endpoint::write_handler, this, ph::_1, ph::_2 )
+            ) );
     }
 
     void write_to( const char *data, size_t len,
                    const ba::ip::udp::endpoint &to )
     {
         sock_.async_send_to( ba::buffer(data, len), to, 0,
-            std::bind( &udp_endpoint::write_handler, this, ph::_1, ph::_2 ) );
+            dispatcher_.wrap(
+                std::bind( &udp_endpoint::write_handler, this, ph::_1, ph::_2 )
+            ) );
     }
 
     void read(  )
     {
         sock_.async_receive( ba::buffer(&data_[0], data_.size( )),
-                std::bind( &udp_endpoint::read_handler, this,
-                           ph::_1, ph::_2 ));
+                dispatcher_.wrap(
+                    std::bind( &udp_endpoint::read_handler, this,
+                               ph::_1, ph::_2 )
+                ) );
     }
 
     void read_from( ba::ip::udp::endpoint from )
@@ -119,12 +132,14 @@ public:
         auto ep = std::make_shared<ba::ip::udp::endpoint>(std::move(from));
         sock_.async_receive_from( ba::buffer(&data_[0], data_.size( )),
                                   *ep, 0,
-                std::bind( &udp_endpoint::read_handler2, this,
-                           ph::_1, ph::_2, ep ));
+                dispatcher_.wrap(
+                    std::bind( &udp_endpoint::read_handler2, this,
+                                ph::_1, ph::_2, ep )
+                ) );
     }
 
+    virtual void on_write( const bs::error_code &, std::size_t ) { }
     virtual void start( ) = 0;
-    virtual void on_write( const bs::error_code &, std::size_t ) = 0;
     virtual void on_read( const bs::error_code &,
                           const ba::ip::udp::endpoint &from,
                           std::uint8_t *, std::size_t ) = 0;
@@ -199,7 +214,7 @@ public:
     void start( ) override
     {
         ep_.address( ).is_v4( ) ? open_v4( ) : open_v6( );
-        sock( ).bind( ep_ );
+        get_socket( ).bind( ep_ );
         read_from( ep_ );
     }
 

@@ -1,6 +1,8 @@
 
 
 #include <iostream>
+#include <unordered_map>
+
 #include "boost/asio.hpp"
 
 #include "udp-wrapper.hpp"
@@ -42,7 +44,7 @@ public:
                   << " len "
                   << len << std::endl;
 
-        sock( ).connect( from );
+        get_socket( ).connect( from );
 
         reader_ = [this](const ba::ip::udp::endpoint &from,
                          std::uint8_t *data, std::size_t len )
@@ -81,20 +83,37 @@ public:
     }
 };
 
+struct address_hash {
+
+    std::uint64_t operator ( )( const ba::ip::address &v ) const
+    {
+        if( v.is_v4( ) ) {
+            return v.to_v4( ).to_ulong( );
+        } else if( v.is_v6( ) ) {
+            auto b = std::move(v.to_v6( ).to_bytes( ));
+            std::hash<std::string> hash_fn;
+            return hash_fn( std::string(&b[0], &b[b.max_size( )] ) );
+        } else {
+            return 0;
+        }
+    }
+};
+
 
 int main( )
 {
+
     try {
 
         ba::io_service ios;
 
-        ba::ip::udp::endpoint ep( ba::ip::address::from_string( "127.0.0.1" ), 12356 );
+        ba::ip::udp::endpoint ep( ba::ip::address::from_string( "127.0.0.1" ), 55667 );
 
         udp_connector0 bc( ios, ep );
         bc.start( );
         //bc.sock( ).connect( ep );
         bc.write_to( "hellO!", 6, ep );
-        bc.read_from( ep );
+        //bc.read_from( ep );
 
         ios.run( );
 
