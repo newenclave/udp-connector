@@ -2,6 +2,7 @@
 #include <memory>
 #include <iostream>
 #include <set>
+#include <thread>
 
 #include "boost/asio.hpp"
 
@@ -9,6 +10,8 @@
 #include "vtrc-delayed-call.h"
 
 #include "udp-wrapper.hpp"
+
+#include "udp-listener.h"
 
 namespace ba = boost::asio;
 namespace bs = boost::system;
@@ -48,31 +51,27 @@ struct client_info: public std::enable_shared_from_this<client_info> {
         start_keeper( );
     }
 
+    ba::ip::udp::endpoint &get_endpoint( )
+    {
+        return my_;
+    }
+
     ~client_info( )
     {
-        std::cout << "Client out " << my_.address( ).to_string( )
-                  << ":" << my_.port( ) << "\n";
+//        std::cout << "Client out " << my_.address( ).to_string( )
+//                  << ":" << my_.port( ) << "\n";
     }
 
     void keeper_handler( const bs::error_code &err );
 
     void start_keeper( )
     {
-        std::cout << "Start keeper" << std::endl;
         dcall_.call_from_now( [this](const bs::error_code &err) {
             keeper_handler( err );
-        }, delayed_call::seconds( 1 ) );
+        }, delayed_call::seconds( 10 ) );
     }
 
-    void on_read( const bs::error_code &err,
-                  std::uint8_t *, std::size_t )
-    {
-        last_ = ticks_now( );
-        std::cout << "Got! " << my_.address( ).to_string( )
-                  << ":" << my_.port( )
-                  << std::endl;
-        std::cout << err.message( ) << "\n";
-    }
+    void on_read( const bs::error_code &err, std::uint8_t *, std::size_t );
 };
 
 using client_map = std::map<ba::ip::udp::endpoint, client_info::shared_type>;
@@ -93,26 +92,17 @@ public:
     client_info::shared_type get_client( const ba::ip::udp::endpoint &from )
     {
         auto f = clients_.find( from );
-        client_info::shared_type client;
         if( f != clients_.end( ) ) {
-            client = f->second;
+            return f->second;
         }
         return client_info::shared_type( );
     }
 
 public:
 
-    enum ep_type { MASTER, SLAVE };
-
-    udp_endpoint_atapter( ba::io_service &ios, ep_type masterslave )
+    udp_endpoint_atapter( ba::io_service &ios  )
         :udp_endpoint(ios)
-        ,master_(masterslave == MASTER)
     { }
-
-    bool is_master( ) const
-    {
-        return master_;
-    }
 
     std::size_t size( ) const
     {
@@ -121,9 +111,9 @@ public:
 
     void remove_client( const ba::ip::udp::endpoint &from )
     {
-        std::cout << "Erase: " << from.address( ).to_string( )
-                  << ":" << from.port( )
-                  << std::endl;
+//        std::cout << "Erase: " << from.address( ).to_string( )
+//                  << ":" << from.port( )
+//                  << std::endl;
         clients_.erase( from );
         on_remove( );
     }
@@ -150,15 +140,15 @@ class udp_endpoint_master;
 
 class udp_endpoint_slave: public udp_endpoint_atapter {
 
-    udp_endpoint_master  *parent_master_;
     ba::ip::udp::endpoint ep_;
+    udp_endpoint_master  *parent_master_;
 
 public:
 
     udp_endpoint_slave( ba::io_service &ios,
                         const ba::ip::udp::endpoint &ep,
                         udp_endpoint_master *master)
-        :udp_endpoint_atapter(ios, udp_endpoint_atapter::SLAVE)
+        :udp_endpoint_atapter(ios)
         ,ep_(ba::ip::udp::endpoint(ep.address( ), 0))
         ,parent_master_(master)
     { }
@@ -172,8 +162,8 @@ public:
                                 : get_socket( ).open( ba::ip::udp::v6( ) );
         get_socket( ).bind( ep_ );
         ep_ = get_socket( ).local_endpoint( );
-        std::cout << "open slave ep: " << ep_.address( ).to_string( )
-                  << ":" << ep_.port( ) << "\n";
+//        std::cout << "open slave ep: " << ep_.address( ).to_string( )
+//                  << ":" << ep_.port( ) << "\n";
         read_from( get_endpoint( ) );
     }
 
@@ -183,6 +173,7 @@ public:
     {
         auto cl = get_client( from );
         if( cl ) {
+            //std::cout << "S" << std::ends;
             cl->on_read( err, data, len );
         }
     }
@@ -192,21 +183,19 @@ class udp_endpoint_master: public udp_endpoint_atapter {
 
     ba::ip::udp::endpoint ep_;
 
-    std::vector<udp_endpoint_slave *> slaves_;
+    std::vector<std::shared_ptr<udp_endpoint_slave> > slaves_;
 
 public:
 
     udp_endpoint_master( ba::io_service &ios,
                          const std::string &addr,
-                         std::uint16_t port )
-        :udp_endpoint_atapter(ios, udp_endpoint_atapter::MASTER)
+                         std::uint16_t port, size_t slaves )
+        :udp_endpoint_atapter(ios)
         ,ep_(ba::ip::address::from_string(addr), port)
     {
-        slaves_.push_back(new  udp_endpoint_slave( ios, ep_, this ));
-        slaves_.push_back(new  udp_endpoint_slave( ios, ep_, this ));
-        slaves_.push_back(new  udp_endpoint_slave( ios, ep_, this ));
-        slaves_.push_back(new  udp_endpoint_slave( ios, ep_, this ));
-        slaves_.push_back(new  udp_endpoint_slave( ios, ep_, this ));
+        while(slaves--) {
+            slaves_.push_back(std::make_shared<udp_endpoint_slave>( ios, std::cref(ep_), this ));
+        }
     }
 
     void start( )
@@ -222,10 +211,11 @@ public:
 
     void dec_slave( udp_endpoint_slave *slave )
     {
-        auto f = std::find( slaves_.begin( ), slaves_.end( ), slave );
-        if( f == slaves_.end( ) ) {
-            std::cout << "Fuuuuck!\n";
-            return;
+        auto f = slaves_.begin( );
+        for( ; f!= slaves_.end( ); ++f) {
+            if( f->get( ) == slave ) {
+                break;
+            }
         }
         while( f != slaves_.begin( ) ) {
             auto prev = f - 1;
@@ -270,10 +260,19 @@ public:
         auto cl = get_client( from );
         if( !cl ) {
             cl = std::make_shared<client_info>( from,
-                                              std::ref(get_io_service( )) );
-            cl->parent_ = (*slaves_.begin( ));
-            cl->parent_->add_client( from, cl );
-            inc_slave( );
+                                                std::ref(get_io_service( )) );
+            if( (*slaves_.begin( ))->size( ) < size( ) ) {
+                cl->parent_ = slaves_.begin( )->get( );
+                cl->parent_->add_client( from, cl );
+                inc_slave( );
+            } else {
+                cl->parent_ = this;
+                add_client( from, cl );
+                inc_slave( );
+            }
+        } else {
+//            std::cout << "A";
+//            std::cout.flush( );
         }
         cl->on_read( err, data, len );
     }
@@ -286,10 +285,9 @@ void udp_endpoint_slave::on_remove( )
 
 void client_info::keeper_handler( const bs::error_code &err )
 {
-    std::cout << "Tick! " << err.message( ) << "\n";
     if( !err ) {
         auto now = ticks_now( );
-        if( now - last_ > 3000000 ) {
+        if( now - last_ > 10000000 ) {
             parent_->dispatch( [this]( ) {
                 parent_->remove_client( my_ );
             } );
@@ -299,14 +297,31 @@ void client_info::keeper_handler( const bs::error_code &err )
     }
 }
 
+void client_info::on_read( const bs::error_code &err,
+                           std::uint8_t *, std::size_t )
+{
+    last_ = ticks_now( );
+//    std::cout << "Got! " << my_.address( ).to_string( )
+//              << ":" << my_.port( )
+//              << std::endl;
+    parent_->write_to( "hello!", 6, my_ );
+}
+
 int main( )
 {
 
     try {
+
         ba::io_service::work wrk(ios);
 
-        udp_endpoint_master eua( ios, "0.0.0.0", 55667 );
+        udp_endpoint_master eua( ios, "0.0.0.0", 55667, 6 );
         eua.start( );
+
+        std::thread([ ]( ){ ios.run( ); }).detach( );
+        std::thread([ ]( ){ ios.run( ); }).detach( );
+        std::thread([ ]( ){ ios.run( ); }).detach( );
+        std::thread([ ]( ){ ios.run( ); }).detach( );
+        std::thread([ ]( ){ ios.run( ); }).detach( );
 
         ios.run( );
 

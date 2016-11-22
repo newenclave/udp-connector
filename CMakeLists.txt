@@ -40,9 +40,10 @@ endif( )
 
 include_directories(    ${Boost_INCLUDE_DIRS}  )
 
-add_executable(server server.cpp)
-add_executable(client client.cpp)
+add_executable( udp-server server.cpp)
+add_executable( udp-client client.cpp)
 
-target_link_libraries(  server ${Boost_LIBRARIES} )
-target_link_libraries(  client ${Boost_LIBRARIES} )
+target_link_libraries(  udp-server ${Boost_LIBRARIES} )
+target_link_libraries(  udp-server "-lpthread" )
+target_link_libraries(  udp-client ${Boost_LIBRARIES} )
 
