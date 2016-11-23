@@ -12,38 +12,13 @@ namespace ba = boost::asio;
 namespace bs = boost::system;
 namespace ph = std::placeholders;
 
-
-class udp_endpoint: public std::enable_shared_from_this<udp_endpoint> {
+class udp_endpoint {
 
     ba::io_service             &ios_;
     ba::io_service::strand      dispatcher_;
     ba::ip::udp::socket         sock_;
     std::vector<std::uint8_t>   data_;
     ba::ip::udp::endpoint       remote_;
-
-
-    typedef std::string message_type;
-    typedef std::function <
-        void (const boost::system::error_code &)
-    > write_closure;
-
-    struct queue_value {
-
-        typedef std::shared_ptr<queue_value> shared_type;
-
-        message_type    message_;
-        write_closure   success_;
-
-        queue_value( const char *data, size_t length )
-            :message_(data, length)
-        { }
-
-        static
-        shared_type create( const char *data, size_t length )
-        {
-            return std::make_shared<queue_value>( data, length );
-        }
-    };
 
     void write_handler( const bs::error_code &err, std::size_t len )
     {
@@ -62,6 +37,11 @@ class udp_endpoint: public std::enable_shared_from_this<udp_endpoint> {
         on_read( err, *from, &data_[0], len );
     }
 
+    void set_buf_size( size_t len )
+    {
+        data_.resize( len );
+    }
+
 public:
 
     udp_endpoint( ba::io_service &ios )
@@ -70,6 +50,16 @@ public:
         ,sock_(ios_)
         ,data_(4096)
     { }
+
+    const std::uint8_t *get_data( ) const
+    {
+        return &data_[0];
+    }
+
+    void set_buffer_size( size_t len )
+    {
+        dispatch( std::bind( &udp_endpoint::set_buf_size, this, len ) );
+    }
 
     ba::ip::udp::endpoint &get_endpoint( )
     {
@@ -130,12 +120,11 @@ public:
     void read_from( ba::ip::udp::endpoint from )
     {
         auto ep = std::make_shared<ba::ip::udp::endpoint>(std::move(from));
-        sock_.async_receive_from( ba::buffer(&data_[0], data_.size( )),
-                                  *ep, 0,
-                dispatcher_.wrap(
-                    std::bind( &udp_endpoint::read_handler2, this,
-                                ph::_1, ph::_2, ep )
-                ) );
+        sock_.async_receive_from( ba::buffer(&data_[0], data_.size( )), *ep, 0,
+                            dispatcher_.wrap(
+                                std::bind( &udp_endpoint::read_handler2, this,
+                                            ph::_1, ph::_2, ep )
+                            ) );
     }
 
     virtual void on_write( const bs::error_code &, std::size_t ) { }

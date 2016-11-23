@@ -36,12 +36,12 @@ namespace test {
 
         }
 
-        bool is_active( )   const
+        bool is_active( ) const
         {
-
+            return false;
         }
 
-        bool is_local( )    const
+        bool is_local( ) const
         {
             return false;
         }
